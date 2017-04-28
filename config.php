@@ -62,8 +62,8 @@ $CFG->passwordsaltmain = password_hash( $connectstr_dbusername, PASSWORD_DEFAULT
 // that your students would use.  Do not include a trailing slash
 // NOTE: The WPI Installer uses the following lines to guess the url being used,
 // You should modify this to use a full url if you are running a production server.
-$app = 'PlaceHolderForDbApp';
-$CFG->wwwroot   = rtrim(strtolower($app),"/");
+
+$CFG->wwwroot   = "http://".$_SERVER['HTTP_HOST'];
 //=========================================================================
 // 4. DATA FILES LOCATION
 //=========================================================================
@@ -78,7 +78,7 @@ $CFG->wwwroot   = rtrim(strtolower($app),"/");
 // - On Windows systems you might specify something like 'c:\moodledata'
 // NOTE: the WPI uses a folder within the webroot however it is protected by the settings in the web.config file
 // If you are running this in production, it would be a good idea to move this directory outside the webroot
-$CFG->dataroot  = str_replace('\\','/',dirname(__FILE__).'\moodledata');
+$CFG->dataroot  = 'D:\home\site\wwwroot\moodledata';
 
 //=========================================================================
 // 5. DATA FILES PERMISSIONS
