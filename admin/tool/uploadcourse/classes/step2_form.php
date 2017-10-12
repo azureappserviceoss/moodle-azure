@@ -89,8 +89,8 @@ class tool_uploadcourse_step2_form extends tool_uploadcourse_base_form {
         $choices = array();
         $choices['0'] = get_string('hide');
         $choices['1'] = get_string('show');
-        $mform->addElement('select', 'defaults[visible]', get_string('visible'), $choices);
-        $mform->addHelpButton('defaults[visible]', 'visible');
+        $mform->addElement('select', 'defaults[visible]', get_string('coursevisibility'), $choices);
+        $mform->addHelpButton('defaults[visible]', 'coursevisibility');
         $mform->setDefault('defaults[visible]', $courseconfig->visible);
 
         $mform->addElement('date_selector', 'defaults[startdate]', get_string('startdate'));
@@ -165,6 +165,13 @@ class tool_uploadcourse_step2_form extends tool_uploadcourse_base_form {
         $mform->addElement('selectyesno', 'defaults[groupmodeforce]', get_string('groupmodeforce', 'group'));
         $mform->addHelpButton('defaults[groupmodeforce]', 'groupmodeforce', 'group');
         $mform->setDefault('defaults[groupmodeforce]', $courseconfig->groupmodeforce);
+
+        // Completion tracking.
+        if (!empty($CFG->enablecompletion)) {
+            $mform->addElement('selectyesno', 'defaults[enablecompletion]', get_string('enablecompletion', 'completion'));
+            $mform->setDefault('defaults[enablecompletion]', $courseconfig->enablecompletion);
+            $mform->addHelpButton('defaults[enablecompletion]', 'enablecompletion', 'completion');
+        }
 
         // Hidden fields.
         $mform->addElement('hidden', 'importid');

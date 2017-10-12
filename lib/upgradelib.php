@@ -371,6 +371,12 @@ function upgrade_stale_php_files_present() {
     global $CFG;
 
     $someexamplesofremovedfiles = array(
+        // Removed in 3.3.
+        '/badges/backpackconnect.php',
+        '/calendar/yui/src/info/assets/skins/sam/moodle-calendar-info.css',
+        '/competency/classes/external/exporter.php',
+        '/mod/forum/forum.js',
+        '/user/pixgroup.php',
         // Removed in 3.2.
         '/calendar/preferences.php',
         '/lib/alfresco/',
@@ -2065,7 +2071,10 @@ function upgrade_fix_missing_root_folders_draft() {
         'filename' => '.',
         'userid' => 0, // Don't rely on any particular user for these system records.
         'filesize' => 0,
-        'contenthash' => sha1(''));
+        // Note: This does not use the file_storage API's hash calculator
+        // because access to core APIs is not allowed during upgrade.
+        'contenthash' => sha1(''),
+    );
     foreach ($rs as $r) {
         $r->pathnamehash = sha1("/$r->contextid/user/draft/$r->itemid/.");
         $DB->insert_record('files', (array)$r + $defaults);
@@ -2242,6 +2251,27 @@ function check_mysql_incomplete_unicode_support(environment_results $result) {
             $result->setStatus(false);
             return $result;
         }
+    }
+    return null;
+}
+
+/**
+ * Check if the site is being served using an ssl url.
+ *
+ * Note this does not really perform any request neither looks for proxies or
+ * other situations. Just looks to wwwroot and warn if it's not using https.
+ *
+ * @param  environment_results $result $result
+ * @return environment_results|null updated results object, or null if the site is https.
+ */
+function check_is_https(environment_results $result) {
+    global $CFG;
+
+    // Only if is defined, non-empty and whatever core tell us.
+    if (!empty($CFG->wwwroot) && !is_https()) {
+        $result->setInfo('site not https');
+        $result->setStatus(false);
+        return $result;
     }
     return null;
 }
@@ -2485,4 +2515,170 @@ function check_libcurl_version(environment_results $result) {
     }
 
     return null;
+}
+
+/**
+ * Fix how auth plugins are called in the 'config_plugins' table.
+ *
+ * For legacy reasons, the auth plugins did not always use their frankenstyle
+ * component name in the 'plugin' column of the 'config_plugins' table. This is
+ * a helper function to correctly migrate the legacy settings into the expected
+ * and consistent way.
+ *
+ * @param string $plugin the auth plugin name such as 'cas', 'manual' or 'mnet'
+ */
+function upgrade_fix_config_auth_plugin_names($plugin) {
+    global $CFG, $DB, $OUTPUT;
+
+    $legacy = (array) get_config('auth/'.$plugin);
+    $current = (array) get_config('auth_'.$plugin);
+
+    // I don't want to rely on array_merge() and friends here just in case
+    // there was some crazy setting with a numerical name.
+
+    if ($legacy) {
+        $new = $legacy;
+    } else {
+        $new = [];
+    }
+
+    if ($current) {
+        foreach ($current as $name => $value) {
+            if (isset($legacy[$name]) && ($legacy[$name] !== $value)) {
+                // No need to pollute the output during unit tests.
+                if (!empty($CFG->upgraderunning)) {
+                    $message = get_string('settingmigrationmismatch', 'core_auth', [
+                        'plugin' => 'auth_'.$plugin,
+                        'setting' => s($name),
+                        'legacy' => s($legacy[$name]),
+                        'current' => s($value),
+                    ]);
+                    echo $OUTPUT->notification($message, \core\output\notification::NOTIFY_ERROR);
+
+                    upgrade_log(UPGRADE_LOG_NOTICE, 'auth_'.$plugin, 'Setting values mismatch detected',
+                        'SETTING: '.$name. ' LEGACY: '.$legacy[$name].' CURRENT: '.$value);
+                }
+            }
+
+            $new[$name] = $value;
+        }
+    }
+
+    foreach ($new as $name => $value) {
+        set_config($name, $value, 'auth_'.$plugin);
+        unset_config($name, 'auth/'.$plugin);
+    }
+}
+
+/**
+ * Populate the auth plugin settings with defaults if needed.
+ *
+ * As a result of fixing the auth plugins config storage, many settings would
+ * be falsely reported as new ones by admin/upgradesettings.php. We do not want
+ * to confuse admins so we try to reduce the bewilderment by pre-populating the
+ * config_plugins table with default values. This should be done only for
+ * disabled auth methods. The enabled methods have their settings already
+ * stored, so reporting actual new settings for them is valid.
+ *
+ * @param string $plugin the auth plugin name such as 'cas', 'manual' or 'mnet'
+ */
+function upgrade_fix_config_auth_plugin_defaults($plugin) {
+    global $CFG;
+
+    $pluginman = core_plugin_manager::instance();
+    $enabled = $pluginman->get_enabled_plugins('auth');
+
+    if (isset($enabled[$plugin])) {
+        // Do not touch settings of enabled auth methods.
+        return;
+    }
+
+    // We can't directly use {@link core\plugininfo\auth::load_settings()} here
+    // because the plugins are not fully upgraded yet. Instead, we emulate what
+    // that method does. We fetch a temporary instance of the plugin's settings
+    // page to get access to the settings and their defaults. Note we are not
+    // adding that temporary instance into the admin tree. Yes, this is a hack.
+
+    $plugininfo = $pluginman->get_plugin_info('auth_'.$plugin);
+    $adminroot = admin_get_root();
+    $ADMIN = $adminroot;
+    $auth = $plugininfo;
+
+    $section = $plugininfo->get_settings_section_name();
+    $settingspath = $plugininfo->full_path('settings.php');
+
+    if (file_exists($settingspath)) {
+        $settings = new admin_settingpage($section, 'Emulated settings page for auth_'.$plugin, 'moodle/site:config');
+        include($settingspath);
+
+        if ($settings) {
+            // Consistently with what admin/cli/upgrade.php does, apply the default settings twice.
+            // I assume this is done for theoretical cases when a default value depends on an other.
+            admin_apply_default_settings($settings, false);
+            admin_apply_default_settings($settings, false);
+        }
+    }
+}
+
+/**
+ * Search for a given theme in any of the parent themes of a given theme.
+ *
+ * @param string $needle The name of the theme you want to search for
+ * @param string $themename The name of the theme you want to search for
+ * @param string $checkedthemeforparents The name of all the themes already checked
+ * @return bool True if found, false if not.
+ */
+function upgrade_theme_is_from_family($needle, $themename, $checkedthemeforparents = []) {
+    global $CFG;
+
+    // Once we've started checking a theme, don't start checking it again. Prevent recursion.
+    if (!empty($checkedthemeforparents[$themename])) {
+        return false;
+    }
+    $checkedthemeforparents[$themename] = true;
+
+    if ($themename == $needle) {
+        return true;
+    }
+
+    if ($themedir = upgrade_find_theme_location($themename)) {
+        $THEME = new stdClass();
+        require($themedir . '/config.php');
+        $theme = $THEME;
+    } else {
+        return false;
+    }
+
+    if (empty($theme->parents)) {
+        return false;
+    }
+
+    // Recursively search through each parent theme.
+    foreach ($theme->parents as $parent) {
+        if (upgrade_theme_is_from_family($needle, $parent, $checkedthemeforparents)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Finds the theme location and verifies the theme has all needed files.
+ *
+ * @param string $themename The name of the theme you want to search for
+ * @return string full dir path or null if not found
+ * @see \theme_config::find_theme_location()
+ */
+function upgrade_find_theme_location($themename) {
+    global $CFG;
+
+    if (file_exists("$CFG->dirroot/theme/$themename/config.php")) {
+        $dir = "$CFG->dirroot/theme/$themename";
+    } else if (!empty($CFG->themedir) and file_exists("$CFG->themedir/$themename/config.php")) {
+        $dir = "$CFG->themedir/$themename";
+    } else {
+        return null;
+    }
+
+    return $dir;
 }

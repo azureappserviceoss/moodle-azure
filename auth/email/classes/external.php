@@ -59,7 +59,7 @@ class auth_email_external extends external_api {
     /**
      * Describes the parameters for get_signup_settings.
      *
-     * @return external_external_function_parameters
+     * @return external_function_parameters
      * @since Moodle 3.2
      */
     public static function get_signup_settings_parameters() {
@@ -137,7 +137,7 @@ class auth_email_external extends external_api {
                      new external_value(PARAM_NOTAGS, 'The order of the name fields')
                 ),
                 'passwordpolicy' => new external_value(PARAM_RAW, 'Password policy', VALUE_OPTIONAL),
-                'sitepolicy' => new external_value(PARAM_URL, 'Site policy url', VALUE_OPTIONAL),
+                'sitepolicy' => new external_value(PARAM_RAW, 'Site policy', VALUE_OPTIONAL),
                 'defaultcity' => new external_value(PARAM_NOTAGS, 'Default city', VALUE_OPTIONAL),
                 'country' => new external_value(PARAM_ALPHA, 'Default country', VALUE_OPTIONAL),
                 'profilefields' => new external_multiple_structure(
@@ -179,7 +179,7 @@ class auth_email_external extends external_api {
     /**
      * Describes the parameters for signup_user.
      *
-     * @return external_external_function_parameters
+     * @return external_function_parameters
      * @since Moodle 3.2
      */
     public static function signup_user_parameters() {

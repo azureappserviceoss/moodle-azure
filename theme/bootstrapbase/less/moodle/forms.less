@@ -58,6 +58,10 @@ form {
 }
 .mform .fdescription.required {
     margin-left: @horizontalComponentOffset;
+    & > .icon {
+        width: 8px;
+        height: 12px;
+    }
 }
 .mform .fpassword .unmask {
     display: inline-block;
@@ -87,6 +91,11 @@ form {
 .mform label .req,
 .mform label .adv {
     cursor: help;
+    & > .icon {
+        width: 8px;
+        height: 12px;
+        margin-left: 3px;
+    }
 }
 .mform .fcheckbox input {
     margin-left: 0;
@@ -111,6 +120,15 @@ form {
 }
 .singleselect label {
     margin-right: .3em;
+}
+
+.custom-select {
+    max-width: 100%;
+}
+
+// Make the submit button align with the .custom-select element.
+.custom-select + input[type="submit"] {
+    margin: 0 0 0 5px;
 }
 
 #portfolio-add-button {

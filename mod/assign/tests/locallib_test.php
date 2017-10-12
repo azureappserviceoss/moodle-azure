@@ -799,6 +799,20 @@ class mod_assign_locallib_testcase extends mod_assign_base_testcase {
         $this->assertEquals($student->id, $participant->id);
         $this->assertFalse($participant->submitted);
         $this->assertFalse($participant->requiregrading);
+        $this->assertFalse($participant->grantedextension);
+    }
+
+    public function test_get_participant_granted_extension() {
+        $assign = $this->create_instance(array('grade' => 100));
+        $student = $this->students[0];
+        $this->setUser($this->editingteachers[0]);
+        $assign->save_user_extension($student->id, time());
+        $participant = $assign->get_participant($student->id);
+
+        $this->assertEquals($student->id, $participant->id);
+        $this->assertFalse($participant->submitted);
+        $this->assertFalse($participant->requiregrading);
+        $this->assertTrue($participant->grantedextension);
     }
 
     public function test_get_participant_with_ungraded_submission() {
@@ -828,6 +842,7 @@ class mod_assign_locallib_testcase extends mod_assign_base_testcase {
         $this->assertEquals($student->id, $participant->id);
         $this->assertTrue($participant->submitted);
         $this->assertTrue($participant->requiregrading);
+        $this->assertFalse($participant->grantedextension);
     }
 
     public function test_get_participant_with_graded_submission() {
@@ -867,6 +882,7 @@ class mod_assign_locallib_testcase extends mod_assign_base_testcase {
         $this->assertEquals($student->id, $participant->id);
         $this->assertTrue($participant->submitted);
         $this->assertFalse($participant->requiregrading);
+        $this->assertFalse($participant->grantedextension);
     }
 
     public function test_count_teams() {
@@ -1228,10 +1244,12 @@ class mod_assign_locallib_testcase extends mod_assign_base_testcase {
         $data->grade = '50.0';
 
         // This student will not receive notification.
+        $data->sendstudentnotifications = 1;
         $data->workflowstate = ASSIGN_MARKING_WORKFLOW_STATE_READYFORRELEASE;
         $assign->testable_apply_grade_to_user($data, $this->students[0]->id, 0);
 
         // This student will receive notification.
+        $data->sendstudentnotifications = 1;
         $data->workflowstate = ASSIGN_MARKING_WORKFLOW_STATE_RELEASED;
         $assign->testable_apply_grade_to_user($data, $this->students[1]->id, 0);
 
@@ -2663,6 +2681,119 @@ Anchor link 2:<a title=\"bananas\" href=\"../logo-240x60.gif\">Link text</a>
     }
 
     /**
+     * Test override exists
+     *
+     * This function needs to obey the group override logic as per the assign grading table and
+     * the overview block.
+     */
+    public function test_override_exists() {
+        global $DB;
+
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course();
+
+        // Create an assign instance.
+        $assign = $this->create_instance(['course' => $course]);
+        $assigninstance = $assign->get_instance();
+
+        // Create users.
+        $users = [
+            'Only in group A'                     => $this->getDataGenerator()->create_user(),
+            'Only in group B'                     => $this->getDataGenerator()->create_user(),
+            'In group A and B (no user override)' => $this->getDataGenerator()->create_user(),
+            'In group A and B (user override)'    => $this->getDataGenerator()->create_user(),
+            'In no groups'                        => $this->getDataGenerator()->create_user()
+        ];
+
+        // Enrol users.
+        foreach ($users as $user) {
+            $this->getDataGenerator()->enrol_user($user->id, $course->id);
+        }
+
+        // Create groups.
+        $groupa = $this->getDataGenerator()->create_group(['courseid' => $course->id]);
+        $groupb = $this->getDataGenerator()->create_group(['courseid' => $course->id]);
+
+        // Add members to groups.
+        // Group A.
+        $this->getDataGenerator()->create_group_member(
+            ['groupid' => $groupa->id, 'userid' => $users['Only in group A']->id]);
+        $this->getDataGenerator()->create_group_member(
+            ['groupid' => $groupa->id, 'userid' => $users['In group A and B (no user override)']->id]);
+        $this->getDataGenerator()->create_group_member(
+            ['groupid' => $groupa->id, 'userid' => $users['In group A and B (user override)']->id]);
+
+        // Group B.
+        $this->getDataGenerator()->create_group_member(
+            ['groupid' => $groupb->id, 'userid' => $users['Only in group B']->id]);
+        $this->getDataGenerator()->create_group_member(
+            ['groupid' => $groupb->id, 'userid' => $users['In group A and B (no user override)']->id]);
+        $this->getDataGenerator()->create_group_member(
+            ['groupid' => $groupb->id, 'userid' => $users['In group A and B (user override)']->id]);
+
+        // Overrides for each of the groups, and a user override.
+        $overrides = [
+            // Override for group A, highest priority (numerically lowest sortorder).
+            [
+                'assignid' => $assigninstance->id,
+                'groupid' => $groupa->id,
+                'userid' => null,
+                'sortorder' => 1,
+                'allowsubmissionsfromdate' => 1,
+                'duedate' => 2,
+                'cutoffdate' => 3
+            ],
+            // Override for group B, lower priority (numerically higher sortorder).
+            [
+                'assignid' => $assigninstance->id,
+                'groupid' => $groupb->id,
+                'userid' => null,
+                'sortorder' => 2,
+                'allowsubmissionsfromdate' => 5,
+                'duedate' => 6,
+                'cutoffdate' => 6
+            ],
+            // User override.
+            [
+                'assignid' => $assigninstance->id,
+                'groupid' => null,
+                'userid' => $users['In group A and B (user override)']->id,
+                'sortorder' => null,
+                'allowsubmissionsfromdate' => 7,
+                'duedate' => 8,
+                'cutoffdate' => 9
+            ],
+        ];
+
+        // Kinda hacky, need to add the ID to the overrides in the above array
+        // for later.
+        foreach ($overrides as &$override) {
+            $override['id'] = $DB->insert_record('assign_overrides', $override);
+        }
+
+        $returnedoverrides = array_reduce(array_keys($users), function($carry, $description) use ($users, $assign) {
+            return $carry + ['For user ' . lcfirst($description) => $assign->override_exists($users[$description]->id)];
+        }, []);
+
+        // Test we get back the correct override from override_exists (== checks all object members match).
+        // User only in group A should see the group A override.
+        $this->assertTrue($returnedoverrides['For user only in group A'] == (object)$overrides[0]);
+        // User only in group B should see the group B override.
+        $this->assertTrue($returnedoverrides['For user only in group B'] == (object)$overrides[1]);
+        // User in group A and B, with no user override should see the group A override
+        // as it has higher priority (numerically lower sortorder).
+        $this->assertTrue($returnedoverrides['For user in group A and B (no user override)'] == (object)$overrides[0]);
+        // User in group A and B, with a user override should see the user override
+        // as it has higher priority (numerically lower sortorder).
+        $this->assertTrue($returnedoverrides['For user in group A and B (user override)'] == (object)$overrides[2]);
+        // User with no overrides should get nothing.
+        $this->assertNull($returnedoverrides['For user in no groups']->duedate);
+        $this->assertNull($returnedoverrides['For user in no groups']->cutoffdate);
+        $this->assertNull($returnedoverrides['For user in no groups']->allowsubmissionsfromdate);
+    }
+
+    /**
      * Test the quicksave grades processor
      */
     public function test_process_save_quick_grades() {
@@ -2821,5 +2952,148 @@ Anchor link 2:<a title=\"bananas\" href=\"../logo-240x60.gif\">Link text</a>
         $this->assertEquals(1, $completiondata->completionstate);
         $completiondata = $completion->get_data($cm, false, $student2->id);
         $this->assertEquals(1, $completiondata->completionstate);
+    }
+
+    public function get_assignments_with_rescaled_null_grades_provider() {
+        return [
+            'Negative less than one is errant' => [
+                'grade' => -0.64,
+                'count' => 1,
+            ],
+            'Negative more than one is errant' => [
+                'grade' => -30.18,
+                'count' => 1,
+            ],
+            'Negative one exactly is not errant' => [
+                'grade' => -1,
+                'count' => 0,
+            ],
+            'Positive grade is not errant' => [
+                'grade' => 1,
+                'count' => 0,
+            ],
+            'Large grade is not errant' => [
+                'grade' => 100,
+                'count' => 0,
+            ],
+            'Zero grade is not errant' => [
+                'grade' => 0,
+                'count' => 0,
+            ],
+        ];
+    }
+
+    /**
+     * Test determining if the assignment as any null grades that were rescaled.
+     * @dataProvider get_assignments_with_rescaled_null_grades_provider
+     */
+    public function test_get_assignments_with_rescaled_null_grades($grade, $count) {
+        global $DB;
+
+        $this->resetAfterTest();
+
+        $assign = $this->create_instance(array('grade' => 100));
+
+        // Try getting a student's grade. This will give a grade of -1.
+        // Then we can override it with a bad negative grade.
+        $assign->get_user_grade($this->students[0]->id, true);
+
+        // Set the grade to something errant.
+        $DB->set_field(
+            'assign_grades',
+            'grade',
+            $grade,
+            [
+                'userid' => $this->students[0]->id,
+                'assignment' => $assign->get_instance()->id,
+            ]
+        );
+
+        $this->assertCount($count, get_assignments_with_rescaled_null_grades());
+    }
+
+    /**
+     * Data provider for test_fix_null_grades
+     * @return array[] Test data for test_fix_null_grades. Each element should contain grade, expectedcount and gradebookvalue
+     */
+    public function fix_null_grades_provider() {
+        return [
+            'Negative less than one is errant' => [
+                'grade' => -0.64,
+                'gradebookvalue' => null,
+            ],
+            'Negative more than one is errant' => [
+                'grade' => -30.18,
+                'gradebookvalue' => null,
+            ],
+            'Negative one exactly is not errant, but shouldn\'t be pushed to gradebook' => [
+                'grade' => -1,
+                'gradebookvalue' => null,
+            ],
+            'Positive grade is not errant' => [
+                'grade' => 1,
+                'gradebookvalue' => 1,
+            ],
+            'Large grade is not errant' => [
+                'grade' => 100,
+                'gradebookvalue' => 100,
+            ],
+            'Zero grade is not errant' => [
+                'grade' => 0,
+                'gradebookvalue' => 0,
+            ],
+        ];
+    }
+
+    /**
+     * Test fix_null_grades
+     * @param number $grade The grade we should set in the assign grading table.
+     * @param number $expectedcount The finalgrade we expect in the gradebook after fixing the grades.
+     * @dataProvider fix_null_grades_provider
+     */
+    public function test_fix_null_grades($grade, $gradebookvalue) {
+        global $DB;
+
+        $this->resetAfterTest();
+
+        $studentid = $this->students[0]->id;
+
+        $assign = $this->create_instance();
+
+        // Try getting a student's grade. This will give a grade of -1.
+        // Then we can override it with a bad negative grade.
+        $assign->get_user_grade($studentid, true);
+
+        // Set the grade to something errant.
+        $DB->set_field(
+            'assign_grades',
+            'grade',
+            $grade,
+            [
+                'userid' => $studentid,
+                'assignment' => $assign->get_instance()->id,
+            ]
+        );
+        $assign->grade = $grade;
+        $assigntemp = clone $assign->get_instance();
+        $assigntemp->cmidnumber = $assign->get_course_module()->idnumber;
+        assign_update_grades($assigntemp);
+
+        // Check that the gradebook was updated with the assign grade. So we can guarentee test results later on.
+        $expectedgrade = $grade == -1 ? null : $grade; // Assign sends null to the gradebook for -1 grades.
+        $gradegrade = grade_grade::fetch(array('userid' => $studentid, 'itemid' => $assign->get_grade_item()->id));
+        $this->assertEquals($expectedgrade, $gradegrade->rawgrade);
+
+        // Call fix_null_grades().
+        $method = new ReflectionMethod(assign::class, 'fix_null_grades');
+        $method->setAccessible(true);
+        $result = $method->invoke($assign);
+
+        $this->assertSame(true, $result);
+
+        $gradegrade = grade_grade::fetch(array('userid' => $studentid, 'itemid' => $assign->get_grade_item()->id));
+
+        // Check that the grade was updated in the gradebook by fix_null_grades.
+        $this->assertEquals($gradebookvalue, $gradegrade->finalgrade);
     }
 }

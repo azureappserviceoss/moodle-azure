@@ -95,6 +95,10 @@ class mod_assign_mod_form extends moodleform_mod {
         $mform->addElement('date_time_selector', 'cutoffdate', $name, array('optional'=>true));
         $mform->addHelpButton('cutoffdate', 'cutoffdate', 'assign');
 
+        $name = get_string('gradingduedate', 'assign');
+        $mform->addElement('date_time_selector', 'gradingduedate', $name, array('optional' => true));
+        $mform->addHelpButton('gradingduedate', 'gradingduedate', 'assign');
+
         $name = get_string('alwaysshowdescription', 'assign');
         $mform->addElement('checkbox', 'alwaysshowdescription', $name);
         $mform->addHelpButton('alwaysshowdescription', 'alwaysshowdescription', 'assign');
@@ -234,6 +238,14 @@ class mod_assign_mod_form extends moodleform_mod {
                 $errors['cutoffdate'] = get_string('cutoffdatefromdatevalidation', 'assign');
             }
         }
+        if ($data['gradingduedate']) {
+            if ($data['allowsubmissionsfromdate'] && $data['allowsubmissionsfromdate'] > $data['gradingduedate']) {
+                $errors['gradingduedate'] = get_string('gradingduefromdatevalidation', 'assign');
+            }
+            if ($data['duedate'] && $data['duedate'] > $data['gradingduedate']) {
+                $errors['gradingduedate'] = get_string('gradingdueduedatevalidation', 'assign');
+            }
+        }
         if ($data['blindmarking'] && $data['attemptreopenmethod'] == ASSIGN_ATTEMPT_REOPEN_METHOD_UNTILPASS) {
             $errors['attemptreopenmethod'] = get_string('reopenuntilpassincompatiblewithblindmarking', 'assign');
         }
@@ -279,7 +291,9 @@ class mod_assign_mod_form extends moodleform_mod {
     public function add_completion_rules() {
         $mform =& $this->_form;
 
-        $mform->addElement('checkbox', 'completionsubmit', '', get_string('completionsubmit', 'assign'));
+        $mform->addElement('advcheckbox', 'completionsubmit', '', get_string('completionsubmit', 'assign'));
+        // Enable this completion rule by default.
+        $mform->setDefault('completionsubmit', 1);
         return array('completionsubmit');
     }
 

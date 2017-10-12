@@ -50,6 +50,14 @@ class core_course_renderer extends plugin_renderer_base {
     protected $strings;
 
     /**
+     * Whether a category content is being initially rendered with children. This is mainly used by the
+     * core_course_renderer::corsecat_tree() to render the appropriate action for the Expand/Collapse all link on
+     * page load.
+     * @var bool
+     */
+    protected $categoryexpandedonload = false;
+
+    /**
      * Override the constructor so that we can initialise the string cache
      *
      * @param moodle_page $page
@@ -531,11 +539,8 @@ class core_course_renderer extends plugin_renderer_base {
                     'type' => 'hidden', 'name' => 'modulename', 'value' => $mod->name));
                 $output .= html_writer::empty_tag('input', array(
                     'type' => 'hidden', 'name' => 'completionstate', 'value' => $newstate));
-                $output .= html_writer::empty_tag('input', array(
-                    'type' => 'image',
-                    'src' => $this->output->pix_url('i/completion-'.$completionicon),
-                    'alt' => $imgalt, 'title' => $imgtitle,
-                    'aria-live' => 'polite'));
+                $output .= html_writer::tag('button',
+                    $this->output->pix_icon('i/completion-' . $completionicon, $imgalt), array('class' => 'btn btn-link'));
                 $output .= html_writer::end_tag('div');
                 $output .= html_writer::end_tag('form');
             } else {
@@ -582,15 +587,58 @@ class core_course_renderer extends plugin_renderer_base {
      * @return string
      */
     public function course_section_cm_name(cm_info $mod, $displayoptions = array()) {
-        if ((!$mod->uservisible && empty($mod->availableinfo)) || !$mod->url) {
+        if (!$mod->is_visible_on_course_page() || !$mod->url) {
             // Nothing to be displayed to the user.
             return '';
         }
 
+        list($linkclasses, $textclasses) = $this->course_section_cm_classes($mod);
+        $groupinglabel = $mod->get_grouping_label($textclasses);
+
         // Render element that allows to edit activity name inline. It calls {@link course_section_cm_name_title()}
         // to get the display title of the activity.
         $tmpl = new \core_course\output\course_module_name($mod, $this->page->user_is_editing(), $displayoptions);
-        return $this->output->render_from_template('core/inplace_editable', $tmpl->export_for_template($this->output));
+        return $this->output->render_from_template('core/inplace_editable', $tmpl->export_for_template($this->output)) .
+            $groupinglabel;
+    }
+
+    /**
+     * Returns the CSS classes for the activity name/content
+     *
+     * For items which are hidden, unavailable or stealth but should be displayed
+     * to current user ($mod->is_visible_on_course_page()), we show those as dimmed.
+     * Students will also see as dimmed activities names that are not yet available
+     * but should still be displayed (without link) with availability info.
+     *
+     * @param cm_info $mod
+     * @return array array of two elements ($linkclasses, $textclasses)
+     */
+    protected function course_section_cm_classes(cm_info $mod) {
+        $linkclasses = '';
+        $textclasses = '';
+        if ($mod->uservisible) {
+            $conditionalhidden = $this->is_cm_conditionally_hidden($mod);
+            $accessiblebutdim = (!$mod->visible || $conditionalhidden) &&
+                has_capability('moodle/course:viewhiddenactivities', $mod->context);
+            if ($accessiblebutdim) {
+                $linkclasses .= ' dimmed';
+                $textclasses .= ' dimmed_text';
+                if ($conditionalhidden) {
+                    $linkclasses .= ' conditionalhidden';
+                    $textclasses .= ' conditionalhidden';
+                }
+            }
+            if ($mod->is_stealth()) {
+                // Stealth activity is the one that is not visible on course page.
+                // It still may be displayed to the users who can manage it.
+                $linkclasses .= ' stealth';
+                $textclasses .= ' stealth';
+            }
+        } else {
+            $linkclasses .= ' dimmed';
+            $textclasses .= ' dimmed_text';
+        }
+        return array($linkclasses, $textclasses);
     }
 
     /**
@@ -608,12 +656,9 @@ class core_course_renderer extends plugin_renderer_base {
      */
     public function course_section_cm_name_title(cm_info $mod, $displayoptions = array()) {
         $output = '';
-        if (!$mod->uservisible && empty($mod->availableinfo)) {
-            // Nothing to be displayed to the user.
-            return $output;
-        }
         $url = $mod->url;
-        if (!$url) {
+        if (!$mod->is_visible_on_course_page() || !$url) {
+            // Nothing to be displayed to the user.
             return $output;
         }
 
@@ -632,51 +677,22 @@ class core_course_renderer extends plugin_renderer_base {
             $altname = get_accesshide(' '.$altname);
         }
 
-        // For items which are hidden but available to current user
-        // ($mod->uservisible), we show those as dimmed only if the user has
-        // viewhiddenactivities, so that teachers see 'items which might not
-        // be available to some students' dimmed but students do not see 'item
-        // which is actually available to current student' dimmed.
-        $linkclasses = '';
-        $accesstext = '';
-        $textclasses = '';
-        if ($mod->uservisible) {
-            $conditionalhidden = $this->is_cm_conditionally_hidden($mod);
-            $accessiblebutdim = (!$mod->visible || $conditionalhidden) &&
-                has_capability('moodle/course:viewhiddenactivities', $mod->context);
-            if ($accessiblebutdim) {
-                $linkclasses .= ' dimmed';
-                $textclasses .= ' dimmed_text';
-                if ($conditionalhidden) {
-                    $linkclasses .= ' conditionalhidden';
-                    $textclasses .= ' conditionalhidden';
-                }
-                // Show accessibility note only if user can access the module himself.
-                $accesstext = get_accesshide(get_string('hiddenfromstudents').':'. $mod->modfullname);
-            }
-        } else {
-            $linkclasses .= ' dimmed';
-            $textclasses .= ' dimmed_text';
-        }
+        list($linkclasses, $textclasses) = $this->course_section_cm_classes($mod);
 
         // Get on-click attribute value if specified and decode the onclick - it
         // has already been encoded for display (puke).
         $onclick = htmlspecialchars_decode($mod->onclick, ENT_QUOTES);
 
-        $groupinglabel = $mod->get_grouping_label($textclasses);
-
         // Display link itself.
         $activitylink = html_writer::empty_tag('img', array('src' => $mod->get_icon_url(),
-                'class' => 'iconlarge activityicon', 'alt' => ' ', 'role' => 'presentation')) . $accesstext .
+                'class' => 'iconlarge activityicon', 'alt' => ' ', 'role' => 'presentation')) .
                 html_writer::tag('span', $instancename . $altname, array('class' => 'instancename'));
         if ($mod->uservisible) {
-            $output .= html_writer::link($url, $activitylink, array('class' => $linkclasses, 'onclick' => $onclick)) .
-                    $groupinglabel;
+            $output .= html_writer::link($url, $activitylink, array('class' => $linkclasses, 'onclick' => $onclick));
         } else {
             // We may be displaying this just in order to show information
-            // about visibility, without the actual link ($mod->uservisible)
-            $output .= html_writer::tag('div', $activitylink, array('class' => $textclasses)) .
-                    $groupinglabel;
+            // about visibility, without the actual link ($mod->is_visible_on_course_page()).
+            $output .= html_writer::tag('div', $activitylink, array('class' => $textclasses));
         }
         return $output;
     }
@@ -690,29 +706,13 @@ class core_course_renderer extends plugin_renderer_base {
      */
     public function course_section_cm_text(cm_info $mod, $displayoptions = array()) {
         $output = '';
-        if (!$mod->uservisible && empty($mod->availableinfo)) {
+        if (!$mod->is_visible_on_course_page()) {
             // nothing to be displayed to the user
             return $output;
         }
         $content = $mod->get_formatted_content(array('overflowdiv' => true, 'noclean' => true));
-        $accesstext = '';
-        $textclasses = '';
-        if ($mod->uservisible) {
-            $conditionalhidden = $this->is_cm_conditionally_hidden($mod);
-            $accessiblebutdim = (!$mod->visible || $conditionalhidden) &&
-                has_capability('moodle/course:viewhiddenactivities', $mod->context);
-            if ($accessiblebutdim) {
-                $textclasses .= ' dimmed_text';
-                if ($conditionalhidden) {
-                    $textclasses .= ' conditionalhidden';
-                }
-                // Show accessibility note only if user can access the module himself.
-                $accesstext = get_accesshide(get_string('hiddenfromstudents').':'. $mod->modfullname);
-            }
-        } else {
-            $textclasses .= ' dimmed_text';
-        }
-        if ($mod->url) {
+        list($linkclasses, $textclasses) = $this->course_section_cm_classes($mod);
+        if ($mod->url && $mod->uservisible) {
             if ($content) {
                 // If specified, display extra content after link.
                 $output = html_writer::tag('div', $content, array('class' =>
@@ -722,10 +722,39 @@ class core_course_renderer extends plugin_renderer_base {
             $groupinglabel = $mod->get_grouping_label($textclasses);
 
             // No link, so display only content.
-            $output = html_writer::tag('div', $accesstext . $content . $groupinglabel,
+            $output = html_writer::tag('div', $content . $groupinglabel,
                     array('class' => 'contentwithoutlink ' . $textclasses));
         }
         return $output;
+    }
+
+    /**
+     * Displays availability info for a course section or course module
+     *
+     * @param string $text
+     * @param string $additionalclasses
+     * @return string
+     */
+    public function availability_info($text, $additionalclasses = '') {
+
+        $data = ['text' => $text, 'classes' => $additionalclasses];
+        $additionalclasses = array_filter(explode(' ', $additionalclasses));
+
+        if (in_array('ishidden', $additionalclasses)) {
+            $data['ishidden'] = 1;
+
+        } else if (in_array('isstealth', $additionalclasses)) {
+            $data['isstealth'] = 1;
+
+        } else if (in_array('isrestricted', $additionalclasses)) {
+            $data['isrestricted'] = 1;
+
+            if (in_array('isfullinfo', $additionalclasses)) {
+                $data['isfullinfo'] = 1;
+            }
+        }
+
+        return $this->render_from_template('core/availability_info', $data);
     }
 
     /**
@@ -738,13 +767,17 @@ class core_course_renderer extends plugin_renderer_base {
      */
     public function course_section_cm_availability(cm_info $mod, $displayoptions = array()) {
         global $CFG;
+        $output = '';
+        if (!$mod->is_visible_on_course_page()) {
+            return $output;
+        }
         if (!$mod->uservisible) {
             // this is a student who is not allowed to see the module but might be allowed
             // to see availability info (i.e. "Available from ...")
             if (!empty($mod->availableinfo)) {
                 $formattedinfo = \core_availability\info::format_info(
                         $mod->availableinfo, $mod->get_course());
-                $output = html_writer::tag('div', $formattedinfo, array('class' => 'availabilityinfo'));
+                $output = $this->availability_info($formattedinfo, 'isrestricted');
             }
             return $output;
         }
@@ -752,23 +785,35 @@ class core_course_renderer extends plugin_renderer_base {
         // information that module is not available to all/some students
         $modcontext = context_module::instance($mod->id);
         $canviewhidden = has_capability('moodle/course:viewhiddenactivities', $modcontext);
+        if ($canviewhidden && !$mod->visible) {
+            // This module is hidden but current user has capability to see it.
+            // Do not display the availability info if the whole section is hidden.
+            if ($mod->get_section_info()->visible) {
+                $output .= $this->availability_info(get_string('hiddenfromstudents'), 'ishidden');
+            }
+        } else if ($mod->is_stealth()) {
+            // This module is available but is normally not displayed on the course page
+            // (this user can see it because they can manage it).
+            $output .= $this->availability_info(get_string('hiddenoncoursepage'), 'isstealth');
+        }
         if ($canviewhidden && !empty($CFG->enableavailability)) {
+            // Display information about conditional availability.
             // Don't add availability information if user is not editing and activity is hidden.
             if ($mod->visible || $this->page->user_is_editing()) {
-                $hidinfoclass = '';
+                $hidinfoclass = 'isrestricted isfullinfo';
                 if (!$mod->visible) {
-                    $hidinfoclass = 'hide';
+                    $hidinfoclass .= ' hide';
                 }
                 $ci = new \core_availability\info_module($mod);
                 $fullinfo = $ci->get_full_information();
                 if ($fullinfo) {
                     $formattedinfo = \core_availability\info::format_info(
                             $fullinfo, $mod->get_course());
-                    return html_writer::div($formattedinfo, 'availabilityinfo ' . $hidinfoclass);
+                    $output .= $this->availability_info($formattedinfo, $hidinfoclass);
                 }
             }
         }
-        return '';
+        return $output;
     }
 
     /**
@@ -823,7 +868,7 @@ class core_course_renderer extends plugin_renderer_base {
         // 2) The 'availableinfo' is empty, i.e. the activity was
         //     hidden in a way that leaves no info, such as using the
         //     eye icon.
-        if (!$mod->uservisible && empty($mod->availableinfo)) {
+        if (!$mod->is_visible_on_course_page()) {
             return $output;
         }
 
@@ -890,14 +935,14 @@ class core_course_renderer extends plugin_renderer_base {
             $output .= html_writer::span($modicons, 'actions');
         }
 
+        // Show availability info (if module is not available).
+        $output .= $this->course_section_cm_availability($mod, $displayoptions);
+
         // If there is content AND a link, then display the content here
         // (AFTER any icons). Otherwise it was displayed before
         if (!empty($url)) {
             $output .= $contentpart;
         }
-
-        // show availability info (if module is not available)
-        $output .= $this->course_section_cm_availability($mod, $displayoptions);
 
         $output .= html_writer::end_tag('div'); // $indentclasses
 
@@ -906,6 +951,34 @@ class core_course_renderer extends plugin_renderer_base {
 
         $output .= html_writer::end_tag('div');
         return $output;
+    }
+
+    /**
+     * Message displayed to the user when they try to access unavailable activity following URL
+     *
+     * This method is a very simplified version of {@link course_section_cm()} to be part of the error
+     * notification only. It also does not check if module is visible on course page or not.
+     *
+     * The message will be displayed inside notification!
+     *
+     * @param cm_info $cm
+     * @return string
+     */
+    public function course_section_cm_unavailable_error_message(cm_info $cm) {
+        if ($cm->uservisible) {
+            return null;
+        }
+        if (!$cm->availableinfo) {
+            return get_string('activityiscurrentlyhidden');
+        }
+
+        $altname = get_accesshide(' ' . $cm->modfullname);
+        $name = html_writer::empty_tag('img', array('src' => $cm->get_icon_url(),
+                'class' => 'iconlarge activityicon', 'alt' => ' ', 'role' => 'presentation')) .
+            html_writer::tag('span', ' '.$cm->get_formatted_name() . $altname, array('class' => 'instancename'));
+        $formattedinfo = \core_availability\info::format_info($cm->availableinfo, $cm->get_course());
+        return html_writer::div($name, 'activityinstance-error') .
+        html_writer::div($formattedinfo, 'availabilityinfo-error');
     }
 
     /**
@@ -1084,8 +1157,7 @@ class core_course_renderer extends plugin_renderer_base {
         if ($chelper->get_show_courses() < self::COURSECAT_SHOW_COURSES_EXPANDED) {
             if ($course->has_summary() || $course->has_course_contacts() || $course->has_course_overviewfiles()) {
                 $url = new moodle_url('/course/info.php', array('id' => $course->id));
-                $image = html_writer::empty_tag('img', array('src' => $this->output->pix_url('i/info'),
-                    'alt' => $this->strings->summary));
+                $image = $this->output->pix_icon('i/info', $this->strings->summary);
                 $content .= html_writer::link($url, $image, array('title' => $this->strings->summary));
                 // Make sure JS file to expand course content is included.
                 $this->coursecat_include_js();
@@ -1447,6 +1519,8 @@ class core_course_renderer extends plugin_renderer_base {
             $classes[] = 'loaded';
             if (!empty($categorycontent)) {
                 $classes[] = 'with_children';
+                // Category content loaded with children.
+                $this->categoryexpandedonload = true;
             }
         }
 
@@ -1493,6 +1567,8 @@ class core_course_renderer extends plugin_renderer_base {
      * @return string
      */
     protected function coursecat_tree(coursecat_helper $chelper, $coursecat) {
+        // Reset the category expanded flag for this course category tree first.
+        $this->categoryexpandedonload = false;
         $categorycontent = $this->coursecat_category_content($chelper, $coursecat, 0);
         if (empty($categorycontent)) {
             return '';
@@ -1508,10 +1584,17 @@ class core_course_renderer extends plugin_renderer_base {
                 'collapseexpand',
             );
 
+            // Check if the category content contains subcategories with children's content loaded.
+            if ($this->categoryexpandedonload) {
+                $classes[] = 'collapse-all';
+                $linkname = get_string('collapseall');
+            } else {
+                $linkname = get_string('expandall');
+            }
+
             // Only show the collapse/expand if there are children to expand.
             $content .= html_writer::start_tag('div', array('class' => 'collapsible-actions'));
-            $content .= html_writer::link('#', get_string('expandall'),
-                    array('class' => implode(' ', $classes)));
+            $content .= html_writer::link('#', $linkname, array('class' => implode(' ', $classes)));
             $content .= html_writer::end_tag('div');
             $this->page->requires->strings_for_js(array('collapseall', 'expandall'), 'moodle');
         }
@@ -2036,7 +2119,6 @@ class core_course_renderer extends plugin_renderer_base {
                 set_attributes(array('class' => 'frontpage-category-names'));
         return $this->coursecat_tree($chelper, coursecat::get(0));
     }
-
 }
 
 /**
