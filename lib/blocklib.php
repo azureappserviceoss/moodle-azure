@@ -320,6 +320,24 @@ class block_manager {
     }
 
     /**
+     * Returns an array of block content objects for all the existings regions
+     *
+     * @param renderer_base $output the rendered to use
+     * @return array of block block_contents objects for all the blocks in all regions.
+     * @since  Moodle 3.3
+     */
+    public function get_content_for_all_regions($output) {
+        $contents = array();
+        $this->check_is_loaded();
+
+        foreach ($this->regions as $region => $val) {
+            $this->ensure_content_created($region, $output);
+            $contents[$region] = $this->visibleblockcontent[$region];
+        }
+        return $contents;
+    }
+
+    /**
      * Helper method used by get_content_for_region.
      * @param string $region region name
      * @param float $weight weight. May be fractional, since you may want to move a block
@@ -710,6 +728,8 @@ class block_manager {
         $ccjoin = "LEFT JOIN {context} ctx ON (ctx.instanceid = bi.id AND ctx.contextlevel = :contextlevel)";
 
         $systemcontext = context_system::instance();
+        list($bpcontext, $bpcontextidparams) = $DB->get_in_or_equal(array($context->id, $systemcontext->id),
+                SQL_PARAMS_NAMED, 'bpcontextid');
         $params = array(
             'contextlevel' => CONTEXT_BLOCK,
             'subpage1' => $this->page->subpage,
@@ -743,7 +763,7 @@ class block_manager {
                 FROM {block_instances} bi
                 JOIN {block} b ON bi.blockname = b.name
                 LEFT JOIN {block_positions} bp ON bp.blockinstanceid = bi.id
-                                                  AND bp.contextid = :contextid1
+                                                  AND bp.contextid $bpcontext
                                                   AND bp.pagetype = :pagetype
                                                   AND bp.subpage = :subpage1
                 $ccjoin
@@ -761,7 +781,8 @@ class block_manager {
                     COALESCE(bp.weight, bi.defaultweight),
                     bi.id";
 
-        $allparams = $params + $parentcontextparams + $pagetypepatternparams + $requiredbythemeparams + $requiredbythemenotparams;
+        $allparams = $params + $parentcontextparams + $pagetypepatternparams + $requiredbythemeparams;
+        $allparams = $allparams + $requiredbythemenotparams + $bpcontextidparams;
         $blockinstances = $DB->get_recordset_sql($sql, $allparams);
 
         $this->birecordsbyregion = $this->prepare_per_region_arrays();
@@ -2537,6 +2558,6 @@ function blocks_add_default_system_blocks() {
     }
 
     $newblocks = array('private_files', 'online_users', 'badges', 'calendar_month', 'calendar_upcoming');
-    $newcontent = array('lp', 'course_overview');
+    $newcontent = array('lp', 'myoverview');
     $page->blocks->add_blocks(array(BLOCK_POS_RIGHT => $newblocks, 'content' => $newcontent), 'my-index', $subpagepattern);
 }

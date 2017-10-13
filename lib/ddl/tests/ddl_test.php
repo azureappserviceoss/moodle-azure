@@ -2080,6 +2080,87 @@ class core_ddl_testcase extends database_driver_testcase {
                         strlen($gen->getNameForObject($table, $fields, $suffix)),
                         'Generated object name is too long. $i = '.$i);
             }
+
+            // Now test to confirm that a duplicate name isn't issued, even if they come from different root names.
+            // Move to a new field.
+            $fields = "fl";
+
+            // Insert twice, moving is to a key with fl2.
+            $this->assertEquals($gen->names_max_length - 1, strlen($gen->getNameForObject($table, $fields, $suffix)));
+            $result1 = $gen->getNameForObject($table, $fields, $suffix);
+
+            // Make sure we end up with _fl2_ in the result.
+            $this->assertRegExp('/_fl2_/', $result1);
+
+            // Now, use a field that would result in the same key if it wasn't already taken.
+            $fields = "fl2";
+            // Because we are now at the max key length, it will try:
+            // - _fl2_ (the natural name)
+            // - _fl2_ (removing the original 2, and adding a counter 2)
+            // - then settle on _fl3_.
+            $result2 = $gen->getNameForObject($table, $fields, $suffix);
+            $this->assertRegExp('/_fl3_/', $result2);
+
+            // Make sure they don't match.
+            $this->assertNotEquals($result1, $result2);
+            // But are only different in the way we expect. This confirms the test is working properly.
+            $this->assertEquals(str_replace('_fl2_', '', $result1), str_replace('_fl3_', '', $result2));
+
+            // Now go back. We would expect the next result to be fl3 again, but it is taken, so it should move to fl4.
+            $fields = "fl";
+            $result3 = $gen->getNameForObject($table, $fields, $suffix);
+
+            $this->assertNotEquals($result2, $result3);
+            $this->assertRegExp('/_fl4_/', $result3);
+        }
+    }
+
+    /**
+     * Data provider for test_get_enc_quoted().
+     *
+     * @return array The type-value pair fixture.
+     */
+    public function test_get_enc_quoted_provider() {
+        return array(
+            // Reserved: some examples from SQL-92.
+            [true, 'from'],
+            [true, 'table'],
+            [true, 'where'],
+            // Not reserved.
+            [false, 'my_awesome_column_name']
+        );
+    }
+
+    /**
+     * This is a test for sql_generator::getEncQuoted().
+     *
+     * @dataProvider test_get_enc_quoted_provider
+     * @param string $reserved Whether the column name is reserved or not.
+     * @param string $columnname The column name to be quoted, according to the value of $reserved.
+     **/
+    public function test_get_enc_quoted($reserved, $columnname) {
+        $DB = $this->tdb;
+        $gen = $DB->get_manager()->generator;
+
+        if (!$reserved) {
+            // No need to quote the column name.
+            $this->assertSame($columnname, $gen->getEncQuoted($columnname));
+        } else {
+            // Column name should be quoted.
+            $dbfamily = $DB->get_dbfamily();
+
+            switch ($dbfamily) {
+                case 'mysql':
+                    $this->assertSame("`$columnname`", $gen->getEncQuoted($columnname));
+                    break;
+                case 'mssql': // The Moodle connection runs under 'QUOTED_IDENTIFIER ON'.
+                case 'oracle':
+                case 'postgres':
+                case 'sqlite':
+                default:
+                    $this->assertSame('"' . $columnname . '"', $gen->getEncQuoted($columnname));
+                    break;
+            }
         }
     }
 

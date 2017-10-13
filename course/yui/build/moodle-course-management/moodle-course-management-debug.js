@@ -661,6 +661,10 @@ DragDrop.prototype = {
             return false;
         }
 
+        while (contstraint.get('scrollHeight') === 0 && !contstraint.compareTo(window.document.body)) {
+            contstraint = contstraint.get('parentNode');
+        }
+
         courseul.all('> li').each(function(li) {
             this.initCourseListing(li, contstraint);
         }, this);
@@ -1348,10 +1352,19 @@ Category.prototype = {
         node.removeClass('collapsed').setAttribute('aria-expanded', 'true');
         action.setAttribute('data-action', 'collapse').setAttrs({
             title: M.util.get_string('collapsecategory', 'moodle', this.getName())
-        }).one('img').setAttrs({
-            src: M.util.image_url('t/switch_minus', 'moodle'),
-            alt: M.util.get_string('collapse', 'moodle')
         });
+
+        require(['core/str', 'core/templates', 'core/notification'], function(Str, Templates, Notification) {
+            Str.get_string('collapse', 'core')
+                .then(function(string) {
+                    return Templates.renderPix('t/switch_minus', 'core', string);
+                })
+                .then(function(html) {
+                    html = Y.Node.create(html).addClass('tree-icon').getDOMNode().outerHTML;
+                    return action.set('innerHTML', html);
+                }).fail(Notification.exception);
+        });
+
         if (ul) {
             ul.setAttribute('aria-hidden', 'false');
         }
@@ -1369,10 +1382,19 @@ Category.prototype = {
         node.addClass('collapsed').setAttribute('aria-expanded', 'false');
         action.setAttribute('data-action', 'expand').setAttrs({
             title: M.util.get_string('expandcategory', 'moodle', this.getName())
-        }).one('img').setAttrs({
-            src: M.util.image_url('t/switch_plus', 'moodle'),
-            alt: M.util.get_string('expand', 'moodle')
         });
+
+        require(['core/str', 'core/templates', 'core/notification'], function(Str, Templates, Notification) {
+            Str.get_string('expand', 'core')
+                .then(function(string) {
+                    return Templates.renderPix('t/switch_plus', 'core', string);
+                })
+                .then(function(html) {
+                    html = Y.Node.create(html).addClass('tree-icon').getDOMNode().outerHTML;
+                    return action.set('innerHTML', html);
+                }).fail(Notification.exception);
+        });
+
         if (ul) {
             ul.setAttribute('aria-hidden', 'true');
         }

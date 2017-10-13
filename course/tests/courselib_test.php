@@ -97,6 +97,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $moduleinfo->sendlatenotifications = true;
         $moduleinfo->duedate = time() + (7 * 24 * 3600);
         $moduleinfo->cutoffdate = time() + (7 * 24 * 3600);
+        $moduleinfo->gradingduedate = time() + (7 * 24 * 3600);
         $moduleinfo->allowsubmissionsfromdate = time();
         $moduleinfo->teamsubmission = true;
         $moduleinfo->requireallteammemberssubmit = true;
@@ -201,6 +202,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $moduleinfo->course = $course->id;
         $moduleinfo->groupingid = $grouping->id;
         $moduleinfo->visible = true;
+        $moduleinfo->visibleoncoursepage = true;
 
         // Sometimes optional generic values for some modules.
         $moduleinfo->name = 'My test module';
@@ -436,6 +438,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $moduleinfo->course = $course->id;
         $moduleinfo->groupingid = $grouping->id;
         $moduleinfo->visible = true;
+        $moduleinfo->visibleoncoursepage = true;
 
         // Sometimes optional generic values for some modules.
         $moduleinfo->name = 'My test module';
@@ -561,7 +564,6 @@ class core_course_courselib_testcase extends advanced_testcase {
         $course->summaryformat = FORMAT_PLAIN;
         $course->format = 'topics';
         $course->newsitems = 0;
-        $course->numsections = 5;
         $course->category = $defaultcategory;
         $original = (array) $course;
 
@@ -607,25 +609,26 @@ class core_course_courselib_testcase extends advanced_testcase {
         global $DB;
         $this->resetAfterTest(true);
 
+        $numsections = 5;
         $course = $this->getDataGenerator()->create_course(
                 array('shortname' => 'GrowingCourse',
                     'fullname' => 'Growing Course',
-                    'numsections' => 5),
+                    'numsections' => $numsections),
                 array('createsections' => true));
 
         // Ensure all 6 (0-5) sections were created and course content cache works properly
         $sectionscreated = array_keys(get_fast_modinfo($course)->get_section_info_all());
-        $this->assertEquals(range(0, $course->numsections), $sectionscreated);
+        $this->assertEquals(range(0, $numsections), $sectionscreated);
 
         // this will do nothing, section already exists
-        $this->assertFalse(course_create_sections_if_missing($course, $course->numsections));
+        $this->assertFalse(course_create_sections_if_missing($course, $numsections));
 
         // this will create new section
-        $this->assertTrue(course_create_sections_if_missing($course, $course->numsections + 1));
+        $this->assertTrue(course_create_sections_if_missing($course, $numsections + 1));
 
         // Ensure all 7 (0-6) sections were created and modinfo/sectioninfo cache works properly
         $sectionscreated = array_keys(get_fast_modinfo($course)->get_section_info_all());
-        $this->assertEquals(range(0, $course->numsections + 1), $sectionscreated);
+        $this->assertEquals(range(0, $numsections + 1), $sectionscreated);
     }
 
     public function test_update_course() {
@@ -955,30 +958,22 @@ class core_course_courselib_testcase extends advanced_testcase {
         // Delete last section.
         $this->assertTrue(course_delete_section($course, 6, true));
         $this->assertFalse($DB->record_exists('course_modules', array('id' => $assign6->cmid)));
-        $this->assertEquals(5, course_get_format($course)->get_course()->numsections);
+        $this->assertEquals(5, course_get_format($course)->get_last_section_number());
 
         // Delete empty section.
         $this->assertTrue(course_delete_section($course, 4, false));
-        $this->assertEquals(4, course_get_format($course)->get_course()->numsections);
+        $this->assertEquals(4, course_get_format($course)->get_last_section_number());
 
         // Delete section in the middle (2).
         $this->assertFalse(course_delete_section($course, 2, false));
         $this->assertTrue(course_delete_section($course, 2, true));
         $this->assertFalse($DB->record_exists('course_modules', array('id' => $assign21->cmid)));
         $this->assertFalse($DB->record_exists('course_modules', array('id' => $assign22->cmid)));
-        $this->assertEquals(3, course_get_format($course)->get_course()->numsections);
+        $this->assertEquals(3, course_get_format($course)->get_last_section_number());
         $this->assertEquals(array(0 => array($assign0->cmid),
             1 => array($assign1->cmid),
             2 => array($assign3->cmid),
             3 => array($assign5->cmid)), get_fast_modinfo($course)->sections);
-
-        // Make last section orphaned.
-        update_course((object)array('id' => $course->id, 'numsections' => 2));
-        $this->assertEquals(2, course_get_format($course)->get_course()->numsections);
-
-        // Remove orphaned section.
-        $this->assertTrue(course_delete_section($course, 3, true));
-        $this->assertEquals(2, course_get_format($course)->get_course()->numsections);
 
         // Remove marked section.
         course_set_marker($course->id, 1);
@@ -3219,6 +3214,8 @@ class core_course_courselib_testcase extends advanced_testcase {
 
         $this->resetAfterTest(true);
 
+        $this->setAdminUser();
+
         $CFG->enablecompletion = true;
 
         $this->setTimezone('UTC');
@@ -3547,7 +3544,7 @@ class core_course_courselib_testcase extends advanced_testcase {
 
         // Delete empty section. No difference from normal, synchronous behaviour.
         $this->assertTrue(course_delete_section($course, 4, false, true));
-        $this->assertEquals(3, course_get_format($course)->get_course()->numsections);
+        $this->assertEquals(3, course_get_format($course)->get_last_section_number());
 
         // Delete a module in section 2 (using async). Need to verify this doesn't generate two tasks when we delete
         // the section in the next step.
@@ -3575,7 +3572,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $this->assertEquals(3, $DB->count_records('course_modules', ['section' => $sectionid, 'deletioninprogress' => 1]));
 
         // Confirm the section has been deleted.
-        $this->assertEquals(2, course_get_format($course)->get_course()->numsections);
+        $this->assertEquals(2, course_get_format($course)->get_last_section_number());
 
         // Check event fired.
         $events = $sink->get_events();
@@ -3644,7 +3641,7 @@ class core_course_courselib_testcase extends advanced_testcase {
 
         // Delete empty section. No difference from normal, synchronous behaviour.
         $this->assertTrue(course_delete_section($course, 4, false, true));
-        $this->assertEquals(3, course_get_format($course)->get_course()->numsections);
+        $this->assertEquals(3, course_get_format($course)->get_last_section_number());
 
         // Delete section in the middle (2).
         $section = $DB->get_record('course_sections', ['course' => $course->id, 'section' => '2']); // For event comparison.
@@ -3665,7 +3662,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $this->assertEmpty($cmcount);
 
         // Confirm the section has been deleted.
-        $this->assertEquals(2, course_get_format($course)->get_course()->numsections);
+        $this->assertEquals(2, course_get_format($course)->get_last_section_number());
 
         // Confirm the course_section_deleted event has been generated.
         $events = $sink->get_events();
@@ -3688,5 +3685,171 @@ class core_course_courselib_testcase extends advanced_testcase {
             }
         }
         $this->assertEquals(2, $count);
+    }
+
+    public function test_classify_course_for_timeline() {
+        global $DB, $CFG;
+
+        require_once($CFG->dirroot.'/completion/criteria/completion_criteria_self.php');
+
+        set_config('enablecompletion', COMPLETION_ENABLED);
+
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+
+        // Create courses for testing.
+        $generator = $this->getDataGenerator();
+        $future = time() + 3600;
+        $past = time() - 3600;
+        $futurecourse = $generator->create_course(['startdate' => $future]);
+        $pastcourse = $generator->create_course(['startdate' => $past - 60, 'enddate' => $past]);
+        $completedcourse = $generator->create_course(['enablecompletion' => COMPLETION_ENABLED]);
+        $inprogresscourse = $generator->create_course();
+
+        // Set completion rules.
+        $criteriadata = new stdClass();
+        $criteriadata->id = $completedcourse->id;
+
+        // Self completion.
+        $criteriadata->criteria_self = COMPLETION_CRITERIA_TYPE_SELF;
+        $class = 'completion_criteria_self';
+        $criterion = new $class();
+        $criterion->update_config($criteriadata);
+
+        $user = $this->getDataGenerator()->create_user();
+        $studentrole = $DB->get_record('role', array('shortname' => 'student'));
+        $this->getDataGenerator()->enrol_user($user->id, $futurecourse->id, $studentrole->id);
+        $this->getDataGenerator()->enrol_user($user->id, $pastcourse->id, $studentrole->id);
+        $this->getDataGenerator()->enrol_user($user->id, $completedcourse->id, $studentrole->id);
+        $this->getDataGenerator()->enrol_user($user->id, $inprogresscourse->id, $studentrole->id);
+
+        $this->setUser($user);
+        core_completion_external::mark_course_self_completed($completedcourse->id);
+        $ccompletion = new completion_completion(array('course' => $completedcourse->id, 'userid' => $user->id));
+        $ccompletion->mark_complete();
+
+        // Aggregate the completions.
+        $this->assertEquals(COURSE_TIMELINE_PAST, course_classify_for_timeline($pastcourse));
+        $this->assertEquals(COURSE_TIMELINE_FUTURE, course_classify_for_timeline($futurecourse));
+        $this->assertEquals(COURSE_TIMELINE_PAST, course_classify_for_timeline($completedcourse));
+        $this->assertEquals(COURSE_TIMELINE_INPROGRESS, course_classify_for_timeline($inprogresscourse));
+    }
+
+    /**
+     * Test the main function for updating all calendar events for a module.
+     */
+    public function test_course_module_calendar_event_update_process() {
+        global $DB;
+
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $completionexpected = time();
+        $duedate = time();
+
+        $course = $this->getDataGenerator()->create_course(['enablecompletion' => COMPLETION_ENABLED]);
+        $assign = $this->getDataGenerator()->create_module('assign', [
+                    'course' => $course,
+                    'completionexpected' => $completionexpected,
+                    'duedate' => $duedate
+                ]);
+
+        $cm = get_coursemodule_from_instance('assign', $assign->id, $course->id);
+        $events = $DB->get_records('event', ['courseid' => $course->id, 'instance' => $assign->id]);
+        // Check that both events are using the expected dates.
+        foreach ($events as $event) {
+            if ($event->eventtype == \core_completion\api::COMPLETION_EVENT_TYPE_DATE_COMPLETION_EXPECTED) {
+                $this->assertEquals($completionexpected, $event->timestart);
+            }
+            if ($event->eventtype == ASSIGN_EVENT_TYPE_DUE) {
+                $this->assertEquals($duedate, $event->timestart);
+            }
+        }
+
+        // We have to manually update the module and the course module.
+        $newcompletionexpected = time() + DAYSECS * 60;
+        $newduedate = time() + DAYSECS * 45;
+        $newmodulename = 'Assign - new name';
+
+        $moduleobject = (object)array('id' => $assign->id, 'duedate' => $newduedate, 'name' => $newmodulename);
+        $DB->update_record('assign', $moduleobject);
+        $cmobject = (object)array('id' => $cm->id, 'completionexpected' => $newcompletionexpected);
+        $DB->update_record('course_modules', $cmobject);
+
+        $assign = $DB->get_record('assign', ['id' => $assign->id]);
+        $cm = get_coursemodule_from_instance('assign', $assign->id, $course->id);
+
+        course_module_calendar_event_update_process($assign, $cm);
+
+        $events = $DB->get_records('event', ['courseid' => $course->id, 'instance' => $assign->id]);
+        // Now check that the details have been updated properly from the function.
+        foreach ($events as $event) {
+            if ($event->eventtype == \core_completion\api::COMPLETION_EVENT_TYPE_DATE_COMPLETION_EXPECTED) {
+                $this->assertEquals($newcompletionexpected, $event->timestart);
+                $this->assertEquals(get_string('completionexpectedfor', 'completion', (object)['instancename' => $newmodulename]),
+                        $event->name);
+            }
+            if ($event->eventtype == ASSIGN_EVENT_TYPE_DUE) {
+                $this->assertEquals($newduedate, $event->timestart);
+                $this->assertEquals($newmodulename, $event->name);
+            }
+        }
+    }
+
+    /**
+     * Test the higher level checks for updating calendar events for an instance.
+     */
+    public function test_course_module_update_calendar_events() {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $completionexpected = time();
+        $duedate = time();
+
+        $course = $this->getDataGenerator()->create_course(['enablecompletion' => COMPLETION_ENABLED]);
+        $assign = $this->getDataGenerator()->create_module('assign', [
+                    'course' => $course,
+                    'completionexpected' => $completionexpected,
+                    'duedate' => $duedate
+                ]);
+
+        $cm = get_coursemodule_from_instance('assign', $assign->id, $course->id);
+
+        // Both the instance and cm objects are missing.
+        $this->assertFalse(course_module_update_calendar_events('assign'));
+        // Just using the assign instance.
+        $this->assertTrue(course_module_update_calendar_events('assign', $assign));
+        // Just using the course module object.
+        $this->assertTrue(course_module_update_calendar_events('assign', null, $cm));
+        // Using both the assign instance and the course module object.
+        $this->assertTrue(course_module_update_calendar_events('assign', $assign, $cm));
+    }
+
+    /**
+     * Test the higher level checks for updating calendar events for a module.
+     */
+    public function test_course_module_bulk_update_calendar_events() {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $completionexpected = time();
+        $duedate = time();
+
+        $course = $this->getDataGenerator()->create_course(['enablecompletion' => COMPLETION_ENABLED]);
+        $course2 = $this->getDataGenerator()->create_course(['enablecompletion' => COMPLETION_ENABLED]);
+        $assign = $this->getDataGenerator()->create_module('assign', [
+                    'course' => $course,
+                    'completionexpected' => $completionexpected,
+                    'duedate' => $duedate
+                ]);
+
+        // No assign instances in this course.
+        $this->assertFalse(course_module_bulk_update_calendar_events('assign', $course2->id));
+        // No book instances for the site.
+        $this->assertFalse(course_module_bulk_update_calendar_events('book'));
+        // Update all assign instances.
+        $this->assertTrue(course_module_bulk_update_calendar_events('assign'));
+        // Update the assign instances for this course.
+        $this->assertTrue(course_module_bulk_update_calendar_events('assign', $course->id));
     }
 }
