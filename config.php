@@ -63,7 +63,7 @@ $CFG->passwordsaltmain = password_hash( $connectstr_dbusername, PASSWORD_DEFAULT
 // NOTE: The WPI Installer uses the following lines to guess the url being used,
 // You should modify this to use a full url if you are running a production server.
 
-$CFG->wwwroot   = "http://".$_SERVER['HTTP_HOST'];
+$CFG->wwwroot   = "https://".$_SERVER['HTTP_HOST'];
 //=========================================================================
 // 4. DATA FILES LOCATION
 //=========================================================================
