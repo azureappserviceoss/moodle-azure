@@ -537,6 +537,18 @@ class stored_file {
      * @return bool success
      */
     public function archive_file(file_archive $filearch, $archivepath) {
+        if ($this->repository) {
+            $this->sync_external_file();
+            if ($this->compare_to_string('')) {
+                // This file is not stored locally - attempt to retrieve it from the repository.
+                // This may happen if the repository deliberately does not fetch files, or if there is a failure with the sync.
+                $fileinfo = $this->repository->get_file($this->get_reference());
+                if (isset($fileinfo['path'])) {
+                    return $filearch->add_file_from_pathname($archivepath, $fileinfo['path']);
+                }
+            }
+        }
+
         return $this->filesystem->add_storedfile_to_archive($this, $filearch, $archivepath);
     }
 
@@ -1051,6 +1063,9 @@ class stored_file {
      * @return  string|bool false if a problem occurs, the thumbnail image data otherwise
      */
     public function generate_image_thumbnail($width, $height) {
+        global $CFG;
+        require_once($CFG->libdir . '/gdlib.php');
+
         if (empty($width) or empty($height)) {
             return false;
         }
