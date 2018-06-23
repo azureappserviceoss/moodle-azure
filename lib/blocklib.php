@@ -800,6 +800,7 @@ class block_manager {
                 $unknown[] = $bi;
             }
         }
+        $blockinstances->close();
 
         // Pages don't necessarily have a defaultregion. The  one time this can
         // happen is when there are no theme block regions, but the script itself
@@ -1958,6 +1959,20 @@ function block_method_result($blockname, $method, $param = NULL) {
         return NULL;
     }
     return call_user_func(array('block_'.$blockname, $method), $param);
+}
+
+/**
+ * Returns a new instance of the specified block instance id.
+ *
+ * @param int $blockinstanceid
+ * @return block_base the requested block instance.
+ */
+function block_instance_by_id($blockinstanceid) {
+    global $DB;
+
+    $blockinstance = $DB->get_record('block_instances', ['id' => $blockinstanceid]);
+    $instance = block_instance($blockinstance->blockname, $blockinstance);
+    return $instance;
 }
 
 /**
