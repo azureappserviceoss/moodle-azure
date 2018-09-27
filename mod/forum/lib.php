@@ -3819,6 +3819,7 @@ function forum_print_discussion_header(&$post, $forum, $group = -1, $datestring 
 
     $post->subject = format_string($post->subject,true);
 
+    $canviewfullnames = has_capability('moodle/site:viewfullnames', $modcontext);
     $timeddiscussion = !empty($CFG->forum_enabletimedposts) && ($post->timestart || $post->timeend);
     $timedoutsidewindow = '';
     if ($timeddiscussion && ($post->timestart > time() || ($post->timeend != 0 && $post->timeend < time()))) {
@@ -3856,7 +3857,7 @@ function forum_print_discussion_header(&$post, $forum, $group = -1, $datestring 
     echo '</span>';
     // User name
     echo '<div class="media-body">';
-    $fullname = fullname($postuser, has_capability('moodle/site:viewfullnames', $modcontext));
+    $fullname = fullname($postuser, $canviewfullnames);
     echo '<a href="'.$CFG->wwwroot.'/user/view.php?id='.$post->userid.'&amp;course='.$forum->course.'">'.$fullname.'</a>';
     echo '</div>';
     echo '</div>';
@@ -3924,7 +3925,7 @@ function forum_print_discussion_header(&$post, $forum, $group = -1, $datestring 
     // In QA forums we check that the user can view participants.
     if ($forum->type !== 'qanda' || $canviewparticipants) {
         echo '<a href="'.$CFG->wwwroot.'/user/view.php?id='.$post->usermodified.'&amp;course='.$forum->course.'">'.
-             fullname($usermodified).'</a><br />';
+             fullname($usermodified, $canviewfullnames).'</a><br />';
         $parenturl = (empty($post->lastpostid)) ? '' : '&amp;parent='.$post->lastpostid;
     }
 
@@ -5589,7 +5590,7 @@ function forum_print_latest_discussions($course, $forum, $maxdiscussions = -1, $
 
     if ($displayformat == 'header') {
         echo '<table cellspacing="0" class="forumheaderlist">';
-        echo '<thead>';
+        echo '<thead class="text-left">';
         echo '<tr>';
         echo '<th class="header topic" scope="col">'.get_string('discussion', 'forum').'</th>';
         echo '<th class="header author" scope="col">'.get_string('startedby', 'forum').'</th>';
@@ -8330,22 +8331,34 @@ function mod_forum_core_calendar_event_action_shows_item_count(calendar_event $e
  *
  * @param calendar_event $event
  * @param \core_calendar\action_factory $factory
+ * @param int $userid User id to use for all capability checks, etc. Set to 0 for current user (default).
  * @return \core_calendar\local\event\entities\action_interface|null
  */
 function mod_forum_core_calendar_provide_event_action(calendar_event $event,
-                                                       \core_calendar\action_factory $factory) {
+                                                      \core_calendar\action_factory $factory,
+                                                      int $userid = 0) {
     global $DB, $USER;
 
-    $cm = get_fast_modinfo($event->courseid)->instances['forum'][$event->instance];
+    if (!$userid) {
+        $userid = $USER->id;
+    }
+
+    $cm = get_fast_modinfo($event->courseid, $userid)->instances['forum'][$event->instance];
+
+    if (!$cm->uservisible) {
+        // The module is not visible to the user for any reason.
+        return null;
+    }
+
     $context = context_module::instance($cm->id);
 
-    if (!has_capability('mod/forum:viewdiscussion', $context)) {
+    if (!has_capability('mod/forum:viewdiscussion', $context, $userid)) {
         return null;
     }
 
     $completion = new \completion_info($cm->get_course());
 
-    $completiondata = $completion->get_data($cm, false);
+    $completiondata = $completion->get_data($cm, false, $userid);
 
     if ($completiondata->completionstate != COMPLETION_INCOMPLETE) {
         return null;
@@ -8362,10 +8375,10 @@ function mod_forum_core_calendar_provide_event_action(calendar_event $event,
                     INNER JOIN {forum_discussions} fd ON fp.discussion=fd.id
                  WHERE
                     fp.userid=:userid AND fd.forum=:forumid";
-    $postcountparams = array('userid' => $USER->id, 'forumid' => $forum->id);
+    $postcountparams = array('userid' => $userid, 'forumid' => $forum->id);
 
     if ($forum->completiondiscussions) {
-        $count = $DB->count_records('forum_discussions', array('forum' => $forum->id, 'userid' => $USER->id));
+        $count = $DB->count_records('forum_discussions', array('forum' => $forum->id, 'userid' => $userid));
         $itemcount += ($forum->completiondiscussions >= $count) ? ($forum->completiondiscussions - $count) : 0;
     }
 

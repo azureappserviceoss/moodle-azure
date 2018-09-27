@@ -88,11 +88,14 @@ function message_count_unread_messages($user1=null, $user2=null) {
                 ON (mua.messageid = m.id AND mua.userid = ? AND (mua.action = ? OR mua.action = ?))
              WHERE mua.id is NULL
                AND mcm.userid = ?";
-    $params = [$user1->id, \core_message\api::MESSAGE_ACTION_DELETED, \core_message\api::MESSAGE_ACTION_READ,  $user1->id];
+    $params = [$user1->id, \core_message\api::MESSAGE_ACTION_DELETED, \core_message\api::MESSAGE_ACTION_READ, $user1->id];
 
     if (!empty($user2)) {
         $sql .= " AND m.useridfrom = ?";
         $params[] = $user2->id;
+    } else {
+        $sql .= " AND m.useridfrom <> ?";
+        $params[] = $user1->id;
     }
 
     return $DB->count_records_sql($sql, $params);
@@ -688,14 +691,16 @@ function message_get_messages($useridto, $useridfrom = 0, $notifications = -1, $
     // If the 'useridto' value is empty then we are going to retrieve messages sent by the useridfrom to any user.
     if (empty($useridto)) {
         $userfields = get_all_user_name_fields(true, 'u', '', 'userto');
+        $messageuseridtosql = 'u.id as useridto';
     } else {
         $userfields = get_all_user_name_fields(true, 'u', '', 'userfrom');
+        $messageuseridtosql = "$useridto as useridto";
     }
 
     // Create the SQL we will be using.
     $messagesql = "SELECT mr.*, $userfields, 0 as notification, '' as contexturl, '' as contexturlname,
                           mua.timecreated as timeusertodeleted, mua2.timecreated as timeread,
-                          mua3.timecreated as timeuserfromdeleted
+                          mua3.timecreated as timeuserfromdeleted, $messageuseridtosql
                      FROM {messages} mr
                INNER JOIN {message_conversations} mc
                        ON mc.id = mr.conversationid

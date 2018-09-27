@@ -1240,10 +1240,14 @@ function glossary_print_entry_icons($course, $cm, $glossary, $entry, $mode='',$h
             array('class' => 'glossary-hidden-note'));
     }
 
-    // Entry link.
-    $return .= '<a class="icon" title="' . get_string('entrylink', 'glossary', $altsuffix) . '" ' .
-               ' href="showentry.php?eid=' . $entry->id . '">' .
-               $OUTPUT->pix_icon('e/insert_edit_link', get_string('entrylink', 'glossary', $altsuffix)) . '</a>';
+    if ($entry->approved || has_capability('mod/glossary:approve', $context)) {
+        $output = true;
+        $return .= \html_writer::link(
+            new \moodle_url('/mod/glossary/showentry.php', ['eid' => $entry->id]),
+            $OUTPUT->pix_icon('fp/link', get_string('entrylink', 'glossary', $altsuffix), 'theme'),
+            ['title' => get_string('entrylink', 'glossary', $altsuffix), 'class' => 'icon']
+        );
+    }
 
     if (has_capability('mod/glossary:approve', $context) && !$glossary->defaultapproval && $entry->approved) {
         $output = true;
@@ -3816,10 +3820,10 @@ function glossary_get_entries_by_search($glossary, $context, $query, $fullsearch
                                         $options = array()) {
     global $DB, $USER;
 
-    // Remove too little terms.
+    // Clean terms.
     $terms = explode(' ', $query);
     foreach ($terms as $key => $term) {
-        if (strlen(trim($term, '+-')) < 2) {
+        if (strlen(trim($term, '+-')) < 1) {
             unset($terms[$key]);
         }
     }
@@ -4222,15 +4226,28 @@ function mod_glossary_get_fontawesome_icon_map() {
  *
  * @param calendar_event $event
  * @param \core_calendar\action_factory $factory
+ * @param int $userid User id to use for all capability checks, etc. Set to 0 for current user (default).
  * @return \core_calendar\local\event\entities\action_interface|null
  */
 function mod_glossary_core_calendar_provide_event_action(calendar_event $event,
-                                                      \core_calendar\action_factory $factory) {
-    $cm = get_fast_modinfo($event->courseid)->instances['glossary'][$event->instance];
+                                                         \core_calendar\action_factory $factory,
+                                                         int $userid = 0) {
+    global $USER;
+
+    if (!$userid) {
+        $userid = $USER->id;
+    }
+
+    $cm = get_fast_modinfo($event->courseid, $userid)->instances['glossary'][$event->instance];
+
+    if (!$cm->uservisible) {
+        // The module is not visible to the user for any reason.
+        return null;
+    }
 
     $completion = new \completion_info($cm->get_course());
 
-    $completiondata = $completion->get_data($cm, false);
+    $completiondata = $completion->get_data($cm, false, $userid);
 
     if ($completiondata->completionstate != COMPLETION_INCOMPLETE) {
         return null;
