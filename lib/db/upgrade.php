@@ -2233,5 +2233,86 @@ function xmldb_main_upgrade($oldversion) {
     // Automatically generated Moodle v3.5.0 release upgrade line.
     // Put any upgrade step following this.
 
+    if ($oldversion < 2018051700.07) {
+        // Add foreign key fk_user to the comments table.
+        $table = new xmldb_table('comments');
+        $key = new xmldb_key('fk_user', XMLDB_KEY_FOREIGN, array('userid'), 'user', array('id'));
+        $dbman->add_key($table, $key);
+
+        upgrade_main_savepoint(true, 2018051700.07);
+    }
+
+    if ($oldversion < 2018051700.08) {
+        // Add composite index ix_concomitem to the table comments.
+        $table = new xmldb_table('comments');
+        $index = new xmldb_index('ix_concomitem', XMLDB_INDEX_NOTUNIQUE, array('contextid', 'commentarea', 'itemid'));
+
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        upgrade_main_savepoint(true, 2018051700.08);
+    }
+
+    if ($oldversion < 2018051701.03) {
+        // Find all duplicate top level categories per context.
+        $duplicates = $DB->get_records_sql("SELECT qc1.*
+                                              FROM {question_categories} qc1
+                                              JOIN {question_categories} qc2
+                                                ON qc1.contextid = qc2.contextid AND qc1.id <> qc2.id
+                                             WHERE qc1.parent = 0 AND qc2.parent = 0
+                                          ORDER BY qc1.contextid, qc1.id");
+
+        // For each context, let the first top category to remain as top category and make the rest its children.
+        $currentcontextid = 0;
+        $chosentopid = 0;
+        foreach ($duplicates as $duplicate) {
+            if ($currentcontextid != $duplicate->contextid) {
+                $currentcontextid = $duplicate->contextid;
+                $chosentopid = $duplicate->id;
+            } else {
+                $DB->set_field('question_categories', 'parent', $chosentopid, ['id' => $duplicate->id]);
+            }
+        }
+
+        // Main savepoint reached.
+        upgrade_main_savepoint(true, 2018051701.03);
+    }
+
+    if ($oldversion < 2018051701.10) {
+        // Remove module associated blog posts for non-existent (deleted) modules.
+        $sql = "SELECT ba.contextid as modcontextid
+                  FROM {blog_association} ba
+                  JOIN {post} p
+                       ON p.id = ba.blogid
+             LEFT JOIN {context} c
+                       ON c.id = ba.contextid
+                 WHERE p.module = :module
+                       AND c.contextlevel IS NULL
+              GROUP BY ba.contextid";
+        if ($deletedmodules = $DB->get_records_sql($sql, array('module' => 'blog'))) {
+            foreach ($deletedmodules as $module) {
+                $assocblogids = $DB->get_fieldset_select('blog_association', 'blogid',
+                    'contextid = :contextid', ['contextid' => $module->modcontextid]);
+                list($sql, $params) = $DB->get_in_or_equal($assocblogids, SQL_PARAMS_NAMED);
+
+                $DB->delete_records_select('tag_instance', "itemid $sql", $params);
+                $DB->delete_records_select('post', "id $sql AND module = :module",
+                    array_merge($params, ['module' => 'blog']));
+                $DB->delete_records('blog_association', ['contextid' => $module->modcontextid]);
+            }
+        }
+        // Main savepoint reached.
+        upgrade_main_savepoint(true, 2018051701.10);
+    }
+
+    if ($oldversion < 2018051702.02) {
+        // Remove unused setting.
+        unset_config('messaginghidereadnotifications');
+
+        // Main savepoint reached.
+        upgrade_main_savepoint(true, 2018051702.02);
+    }
+
     return true;
 }

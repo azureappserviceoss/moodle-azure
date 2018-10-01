@@ -34,6 +34,12 @@ if ($hassiteconfig) {
                 new lang_string('contactdataprotectionofficer_desc', 'tool_dataprivacy'), 0)
         );
 
+        // Set days approved data requests will be accessible. 1 week default.
+        $privacysettings->add(new admin_setting_configduration('tool_dataprivacy/privacyrequestexpiry',
+                new lang_string('privacyrequestexpiry', 'tool_dataprivacy'),
+                new lang_string('privacyrequestexpiry_desc', 'tool_dataprivacy'),
+                WEEKSECS, 1));
+
         // Fetch roles that are assignable.
         $assignableroles = get_assignable_roles(context_system::instance());
 
@@ -57,22 +63,25 @@ if ($hassiteconfig) {
     }
 }
 
-// Link that leads to the data requests management page.
-$ADMIN->add('privacy', new admin_externalpage('datarequests', get_string('datarequests', 'tool_dataprivacy'),
-    new moodle_url('/admin/tool/dataprivacy/datarequests.php'), 'tool/dataprivacy:managedatarequests')
-);
+// Restrict config links to the DPO.
+if (tool_dataprivacy\api::is_site_dpo($USER->id)) {
+    // Link that leads to the data requests management page.
+    $ADMIN->add('privacy', new admin_externalpage('datarequests', get_string('datarequests', 'tool_dataprivacy'),
+        new moodle_url('/admin/tool/dataprivacy/datarequests.php'), 'tool/dataprivacy:managedatarequests')
+    );
 
-// Link that leads to the data registry management page.
-$ADMIN->add('privacy', new admin_externalpage('dataregistry', get_string('dataregistry', 'tool_dataprivacy'),
-    new moodle_url('/admin/tool/dataprivacy/dataregistry.php'), 'tool/dataprivacy:managedataregistry')
-);
+    // Link that leads to the data registry management page.
+    $ADMIN->add('privacy', new admin_externalpage('dataregistry', get_string('dataregistry', 'tool_dataprivacy'),
+        new moodle_url('/admin/tool/dataprivacy/dataregistry.php'), 'tool/dataprivacy:managedataregistry')
+    );
 
-// Link that leads to the review page of expired contexts that are up for deletion.
-$ADMIN->add('privacy', new admin_externalpage('datadeletion', get_string('datadeletion', 'tool_dataprivacy'),
-        new moodle_url('/admin/tool/dataprivacy/datadeletion.php'), 'tool/dataprivacy:managedataregistry')
-);
+    // Link that leads to the review page of expired contexts that are up for deletion.
+    $ADMIN->add('privacy', new admin_externalpage('datadeletion', get_string('datadeletion', 'tool_dataprivacy'),
+            new moodle_url('/admin/tool/dataprivacy/datadeletion.php'), 'tool/dataprivacy:managedataregistry')
+    );
 
-// Link that leads to the other data registry management page.
-$ADMIN->add('privacy', new admin_externalpage('pluginregistry', get_string('pluginregistry', 'tool_dataprivacy'),
-    new moodle_url('/admin/tool/dataprivacy/pluginregistry.php'), 'tool/dataprivacy:managedataregistry')
-);
+    // Link that leads to the other data registry management page.
+    $ADMIN->add('privacy', new admin_externalpage('pluginregistry', get_string('pluginregistry', 'tool_dataprivacy'),
+        new moodle_url('/admin/tool/dataprivacy/pluginregistry.php'), 'tool/dataprivacy:managedataregistry')
+    );
+}
